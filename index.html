@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MD Review — folder-based markdown review</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.1.0/diff.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --border:#dfe3e8; --text:#1c2733; --muted:#6b7a8c;
+    --accent:#1f6feb; --green:#1a7f37; --green-bg:#dafbe1; --red:#cf222e; --red-bg:#ffebe9;
+    --amber:#9a6700; --amber-bg:#fff8c5; --comment:#8250df; --comment-bg:#fbefff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex-wrap:wrap}
+  header h1{font-size:15px;margin:0 8px 0 0}
+  button{font:inherit;font-size:13px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;color:var(--text)}
+  button:hover{background:#f0f3f6}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:#1a5fd0}
+  button.approve{color:var(--green);border-color:var(--green)}
+  button.approve.active{background:var(--green);color:#fff}
+  button.reject{color:var(--red);border-color:var(--red)}
+  button.reject.active{background:var(--red);color:#fff}
+  button:disabled{opacity:.45;cursor:default}
+  input[type=text]{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:6px}
+  #main{flex:1;display:flex;min-height:0}
+  #sidebar{width:300px;min-width:220px;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;padding:8px}
+  #content{flex:1;display:flex;flex-direction:column;min-width:0}
+  .dirlabel{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:10px 4px 3px}
+  .fitem{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px}
+  .fitem:hover{background:#eef1f5}
+  .fitem.sel{background:#dbe7fb}
+  .fitem .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .badge{font-size:11px;line-height:1}
+  .tag{font-size:10px;padding:1px 5px;border-radius:8px;background:#eee;color:var(--muted)}
+  .tag.edited{background:var(--amber-bg);color:var(--amber)}
+  .tag.added{background:#ddf4ff;color:#0969da}
+  #toolbar{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex-wrap:wrap}
+  #toolbar .fname{font-weight:600;font-size:14px;margin-right:auto;overflow:hidden;text-overflow:ellipsis}
+  .tabs{display:flex;gap:2px}
+  .tabs button{border:none;border-radius:6px 6px 0 0;background:transparent;padding:6px 12px;color:var(--muted)}
+  .tabs button.active{background:var(--bg);color:var(--text);font-weight:600}
+  #panes{flex:1;display:flex;min-height:0}
+  #viewwrap{flex:1;overflow-y:auto;padding:0 24px 60px;min-width:0}
+  #commentbar{width:300px;min-width:240px;border-left:1px solid var(--border);background:var(--panel);overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+  #preview{max-width:860px;margin:0 auto;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:28px 36px;margin-top:16px;font-size:15px;line-height:1.55}
+  #preview table{border-collapse:collapse;margin:12px 0;font-size:14px}
+  #preview th,#preview td{border:1px solid var(--border);padding:5px 10px;text-align:left}
+  #preview th{background:#f0f3f6}
+  #preview code{background:#eef1f5;padding:1px 4px;border-radius:4px;font-size:.9em}
+  #preview pre{background:#f0f3f6;padding:12px;border-radius:6px;overflow-x:auto}
+  #preview blockquote{border-left:3px solid var(--border);margin-left:0;padding-left:14px;color:var(--muted)}
+  #preview h1,#preview h2{border-bottom:1px solid var(--border);padding-bottom:5px}
+  ins.cm{background:var(--green-bg);color:var(--green);text-decoration:none;border-radius:3px;padding:0 2px}
+  del.cm{background:var(--red-bg);color:var(--red);border-radius:3px;padding:0 2px}
+  mark.cm{background:var(--amber-bg);border-radius:3px;padding:0 2px}
+  span.cmc{background:var(--comment-bg);color:var(--comment);border-radius:3px;padding:0 4px;font-size:.9em;font-style:italic}
+  span.cmc::before{content:"💬 "}
+  #editor{flex:1;display:none;flex-direction:column;min-width:0}
+  #edtools{display:flex;gap:6px;padding:8px 14px;flex-wrap:wrap;align-items:center}
+  #edtools .hint{font-size:12px;color:var(--muted);margin-left:auto}
+  #edta{flex:1;margin:0 14px 14px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:14px;border:1px solid var(--border);border-radius:8px;resize:none;background:var(--panel)}
+  #diffpane{display:none;flex:1;overflow-y:auto;padding:16px 24px}
+  #diffbox{max-width:900px;margin:0 auto;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:24px;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+  .cmt{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;background:#fff}
+  .cmt .meta{font-size:11px;color:var(--muted);margin-bottom:3px}
+  .cmt .del{float:right;color:var(--muted);cursor:pointer;border:none;background:none;padding:0 2px}
+  #cmtnew{display:flex;flex-direction:column;gap:6px}
+  #cmtnew textarea{font:inherit;font-size:13px;padding:6px;border:1px solid var(--border);border-radius:6px;resize:vertical;min-height:54px}
+  #welcome{max-width:640px;margin:60px auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:32px 40px;line-height:1.6}
+  #welcome h2{margin-top:0}
+  .statusline{font-size:12px;color:var(--muted)}
+  #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1c2733;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:50}
+  #toast.show{opacity:1}
+  .warn{background:var(--red-bg);color:var(--red);padding:10px 14px;border-radius:8px;font-size:13px}
+  .legend{font-size:12px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;max-width:860px;margin:10px auto 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>📋 MD Review</h1>
+  <button id="btnOpen" class="primary">Open folder…</button>
+  <button id="btnNew" disabled>＋ New .md file</button>
+  <button id="btnExport" disabled>Export summary</button>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+    <label style="font-size:12px;color:var(--muted)">Reviewer</label>
+    <input type="text" id="reviewer" placeholder="Your name" style="width:130px">
+  </span>
+</header>
+<div id="main">
+  <div id="sidebar"><div style="padding:14px;color:var(--muted);font-size:13px">No folder open.</div></div>
+  <div id="content">
+    <div id="toolbar" style="display:none">
+      <span class="fname" id="fname"></span>
+      <span class="tabs">
+        <button id="tabPrev" class="active">Preview</button>
+        <button id="tabEdit">Edit</button>
+        <button id="tabDiff">Changes</button>
+      </span>
+      <button id="btnApprove" class="approve">✔ Approve</button>
+      <button id="btnReject" class="reject">✖ Request changes</button>
+      <button id="btnClear">Reset status</button>
+    </div>
+    <div id="panes">
+      <div id="viewwrap">
+        <div id="welcome">
+          <h2>Review markdown bundles in a folder</h2>
+          <p>Click <b>Open folder…</b> and pick the folder containing the <code>.md</code> files (e.g. your unzipped <code>review-bundle</code>). The browser will ask permission to read and write in that folder.</p>
+          <p><b>How it works</b></p>
+          <p>
+            • <b>Originals are never modified.</b> When you edit a file, changes are saved to a <code>NAME.REVIEWED.md</code> copy next to it.<br>
+            • Edits use <b>CriticMarkup</b>: <code>{++added++}</code>, <code>{--deleted--}</code>, <code>{~~old~&gt;new~~}</code>, <code>{&gt;&gt;comment&lt;&lt;}</code>, <code>{==highlight==}</code> — rendered in colour in Preview, and readable as plain text by anyone.<br>
+            • <b>Approve / Request changes</b> per file; statuses and comments are saved to <code>.review-state.json</code> in the folder, tagged with the reviewer name.<br>
+            • <b>＋ New .md file</b> adds your own files to the bundle.<br>
+            • <b>Export summary</b> writes <code>REVIEW_SUMMARY.md</code> with all statuses and comments — send that back with the folder.
+          </p>
+          <div id="compat"></div>
+        </div>
+        <div class="legend" id="legend" style="display:none">
+          <span><ins class="cm">insertion</ins></span><span><del class="cm">deletion</del></span><span><mark class="cm">highlight</mark></span><span><span class="cmc">comment</span></span>
+        </div>
+        <div id="preview" style="display:none"></div>
+      </div>
+      <div id="editor">
+        <div id="edtools">
+          <button data-ins="++">＋ Insert</button>
+          <button data-ins="--">－ Delete</button>
+          <button data-ins="~~">↔ Replace</button>
+          <button data-ins=">>">💬 Comment</button>
+          <button data-ins="==">🖍 Highlight</button>
+          <button id="btnSave" class="primary">💾 Save</button>
+          <span class="hint">Select text, then click a mark. Saved to the .REVIEWED.md copy — the original stays untouched.</span>
+        </div>
+        <textarea id="edta" spellcheck="false"></textarea>
+      </div>
+      <div id="diffpane"><div id="diffbox"></div></div>
+      <div id="commentbar" style="display:none">
+        <b style="font-size:13px">Comments on this file</b>
+        <div id="cmtlist"></div>
+        <div id="cmtnew">
+          <textarea id="cmttext" placeholder="Add a comment…"></textarea>
+          <button id="btnCmt" class="primary">Add comment</button>
+        </div>
+        <div class="statusline" id="fstatus"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const REV_SUFFIX = ".REVIEWED.md";
+const STATE_FILE = ".review-state.json";
+
+let rootHandle = null;
+let files = [];            // {path, name, dir, handle, parentDirHandle, reviewedHandle|null, added:boolean}
+let state = { files: {} }; // path -> {status, statusBy, statusAt, comments:[{author,text,time}], added}
+let current = null;
+let currentTab = "prev";
+let dirty = false;
+
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2200); }
+function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function reviewerName(){ return $("reviewer").value.trim() || "Reviewer"; }
+$("reviewer").value = localStorage.getItem("mdrev-name") || "";
+$("reviewer").addEventListener("change", ()=> localStorage.setItem("mdrev-name", $("reviewer").value.trim()));
+
+if (!window.showDirectoryPicker){
+  $("compat").innerHTML = '<div class="warn">This browser does not support folder access. Please open this file in <b>Chrome</b> or <b>Edge</b>.</div>';
+  $("btnOpen").disabled = true;
+}
+
+/* ---------- CriticMarkup ---------- */
+function criticToHtml(t){
+  return t
+    .replace(/\{~~([\s\S]*?)~>([\s\S]*?)~~\}/g, (_,a,b)=>`<del class="cm">${esc(a)}</del><ins class="cm">${esc(b)}</ins>`)
+    .replace(/\{\+\+([\s\S]*?)\+\+\}/g, (_,a)=>`<ins class="cm">${esc(a)}</ins>`)
+    .replace(/\{--([\s\S]*?)--\}/g, (_,a)=>`<del class="cm">${esc(a)}</del>`)
+    .replace(/\{==([\s\S]*?)==\}/g, (_,a)=>`<mark class="cm">${esc(a)}</mark>`)
+    .replace(/\{>>([\s\S]*?)<<\}/g, (_,a)=>`<span class="cmc">${esc(a)}</span>`);
+}
+function criticAccept(t){
+  return t
+    .replace(/\{~~[\s\S]*?~>([\s\S]*?)~~\}/g, "$1")
+    .replace(/\{\+\+([\s\S]*?)\+\+\}/g, "$1")
+    .replace(/\{--[\s\S]*?--\}/g, "")
+    .replace(/\{==([\s\S]*?)==\}/g, "$1")
+    .replace(/\{>>[\s\S]*?<<\}/g, "");
+}
+
+/* ---------- folder handling ---------- */
+async function idb(mode, val){
+  return new Promise((res,rej)=>{
+    const req = indexedDB.open("mdrev",1);
+    req.onupgradeneeded = ()=> req.result.createObjectStore("kv");
+    req.onsuccess = ()=>{
+      const tx = req.result.transaction("kv", mode==="set"?"readwrite":"readonly");
+      const st = tx.objectStore("kv");
+      const r = mode==="set" ? st.put(val,"dir") : st.get("dir");
+      r.onsuccess = ()=>res(r.result); r.onerror = ()=>rej(r.error);
+    };
+    req.onerror = ()=>rej(req.error);
+  });
+}
+
+$("btnOpen").onclick = async ()=>{
+  try{
+    rootHandle = await showDirectoryPicker({ mode:"readwrite" });
+    await idb("set", rootHandle).catch(()=>{});
+    await loadFolder();
+  }catch(e){ if(e.name!=="AbortError") toast("Could not open folder: "+e.message); }
+};
+
+// try to offer reopen of last folder
+(async ()=>{
+  try{
+    const h = await idb("get");
+    if (h){
+      const b = document.createElement("button");
+      b.textContent = "Reopen last folder";
+      b.onclick = async ()=>{
+        const p = await h.requestPermission({mode:"readwrite"});
+        if (p==="granted"){ rootHandle=h; await loadFolder(); }
+      };
+      $("btnOpen").after(b);
+    }
+  }catch(e){}
+})();
+
+async function walk(dirHandle, prefix, out){
+  const entries = [];
+  for await (const entry of dirHandle.values()) entries.push(entry);
+  entries.sort((a,b)=> a.name.localeCompare(b.name));
+  for (const entry of entries){
+    if (entry.name.startsWith(".")) continue;
+    if (entry.kind==="directory"){
+      await walk(entry, prefix+entry.name+"/", out);
+    } else if (entry.name.toLowerCase().endsWith(".md")){
+      out.push({ path: prefix+entry.name, name: entry.name, dir: prefix||"(root)", handle: entry, parentDirHandle: dirHandle, reviewedHandle: null });
+    }
+  }
+}
+
+async function loadFolder(){
+  const all = [];
+  await walk(rootHandle, "", all);
+  // pair REVIEWED copies with originals
+  const revMap = {};
+  files = [];
+  for (const f of all){
+    if (f.name.endsWith(REV_SUFFIX)) revMap[f.path.slice(0, -REV_SUFFIX.length) + ".md"] = f;
+  }
+  for (const f of all){
+    if (f.name.endsWith(REV_SUFFIX)) continue;
+    f.reviewedHandle = revMap[f.path] ? revMap[f.path].handle : null;
+    files.push(f);
+  }
+  // load state
+  state = { files:{} };
+  try{
+    const sh = await rootHandle.getFileHandle(STATE_FILE);
+    state = JSON.parse(await (await sh.getFile()).text());
+    if (!state.files) state.files = {};
+  }catch(e){}
+  for (const f of files){ f.added = !!(state.files[f.path] && state.files[f.path].added); }
+  $("btnNew").disabled = false;
+  $("btnExport").disabled = false;
+  renderTree();
+  if (files.length) selectFile(files[0]); else { toast("No .md files found in this folder"); }
+}
+
+async function saveState(){
+  const sh = await rootHandle.getFileHandle(STATE_FILE, {create:true});
+  const w = await sh.createWritable();
+  await w.write(JSON.stringify(state, null, 2));
+  await w.close();
+}
+
+/* ---------- tree ---------- */
+function fstate(path){ if(!state.files[path]) state.files[path] = {status:"pending", comments:[]}; if(!state.files[path].comments) state.files[path].comments=[]; return state.files[path]; }
+
+function renderTree(){
+  const sb = $("sidebar"); sb.innerHTML = "";
+  const dirs = {};
+  for (const f of files){ (dirs[f.dir] = dirs[f.dir]||[]).push(f); }
+  for (const d of Object.keys(dirs).sort((a,b)=> a==="(root)"?-1: b==="(root)"?1: a.localeCompare(b))){
+    const lab = document.createElement("div"); lab.className="dirlabel"; lab.textContent = d==="(root)" ? "bundle root" : d; sb.appendChild(lab);
+    for (const f of dirs[d]){
+      const st = fstate(f.path);
+      const row = document.createElement("div");
+      row.className = "fitem" + (current===f ? " sel":"");
+      const badge = st.status==="approved" ? "✅" : st.status==="changes" ? "❌" : "⬜";
+      let tags = "";
+      if (f.reviewedHandle) tags += '<span class="tag edited">edited</span>';
+      if (f.added) tags += '<span class="tag added">added</span>';
+      if (st.comments.length) tags += `<span class="tag">💬${st.comments.length}</span>`;
+      row.innerHTML = `<span class="badge">${badge}</span><span class="name" title="${esc(f.path)}">${esc(f.name)}</span>${tags}`;
+      row.onclick = ()=> selectFile(f);
+      sb.appendChild(row);
+    }
+  }
+}
+
+/* ---------- file view ---------- */
+async function readHandle(h){ return await (await h.getFile()).text(); }
+
+async function selectFile(f){
+  if (dirty && !confirm("Discard unsaved edits?")) return;
+  dirty = false;
+  current = f;
+  $("welcome").style.display = "none";
+  $("toolbar").style.display = "flex";
+  $("commentbar").style.display = "flex";
+  $("fname").textContent = f.path + (f.reviewedHandle ? "  →  " + f.name.replace(/\.md$/, REV_SUFFIX) : "");
+  renderTree();
+  setTab("prev");
+  await renderAll();
+}
+
+async function renderAll(){
+  const f = current; if(!f) return;
+  const originalText = await readHandle(f.handle);
+  const workText = f.reviewedHandle ? await readHandle(f.reviewedHandle) : originalText;
+
+  // preview
+  const html = window.marked ? marked.parse(criticToHtml(workText)) : "<pre>"+esc(workText)+"</pre>";
+  $("preview").innerHTML = html;
+  $("preview").style.display = "block";
+  $("legend").style.display = /class="cm/.test(html) ? "flex" : "none";
+
+  // editor
+  if (!dirty) $("edta").value = workText;
+
+  // diff
+  const db = $("diffbox");
+  if (!f.reviewedHandle){
+    db.innerHTML = '<span style="color:var(--muted)">No edits yet — the original is unchanged. Edits you save create a .REVIEWED.md copy, and the differences appear here.</span>';
+  } else if (window.Diff){
+    const parts = Diff.diffWords(originalText, criticAccept(workText));
+    db.innerHTML = parts.map(p=> p.added ? `<ins class="cm">${esc(p.value)}</ins>` : p.removed ? `<del class="cm">${esc(p.value)}</del>` : esc(p.value)).join("");
+  } else db.textContent = "Diff library failed to load.";
+
+  renderComments();
+  renderStatus();
+}
+
+function renderStatus(){
+  const st = fstate(current.path);
+  $("btnApprove").classList.toggle("active", st.status==="approved");
+  $("btnReject").classList.toggle("active", st.status==="changes");
+  $("fstatus").textContent = st.status==="pending" ? "Status: pending review"
+    : `Status: ${st.status==="approved"?"approved":"changes requested"} by ${st.statusBy||"?"} on ${st.statusAt ? new Date(st.statusAt).toLocaleString() : "?"}`;
+}
+
+function renderComments(){
+  const st = fstate(current.path);
+  const list = $("cmtlist"); list.innerHTML = "";
+  st.comments.forEach((c,i)=>{
+    const d = document.createElement("div"); d.className="cmt";
+    d.innerHTML = `<button class="del" title="Delete">×</button><div class="meta">${esc(c.author)} · ${new Date(c.time).toLocaleString()}</div>${esc(c.text)}`;
+    d.querySelector(".del").onclick = async ()=>{ st.comments.splice(i,1); await saveState(); renderComments(); renderTree(); };
+    list.appendChild(d);
+  });
+  if (!st.comments.length) list.innerHTML = '<div class="statusline">No comments yet.</div>';
+}
+
+/* ---------- tabs ---------- */
+function setTab(t){
+  currentTab = t;
+  $("tabPrev").classList.toggle("active", t==="prev");
+  $("tabEdit").classList.toggle("active", t==="edit");
+  $("tabDiff").classList.toggle("active", t==="diff");
+  $("viewwrap").style.display = t==="prev" ? "block":"none";
+  $("editor").style.display  = t==="edit" ? "flex":"none";
+  $("diffpane").style.display= t==="diff" ? "block":"none";
+}
+$("tabPrev").onclick = ()=>{ setTab("prev"); renderAll(); };
+$("tabEdit").onclick = ()=> setTab("edit");
+$("tabDiff").onclick = ()=>{ setTab("diff"); renderAll(); };
+
+/* ---------- editing ---------- */
+$("edta").addEventListener("input", ()=> dirty = true);
+
+document.querySelectorAll("#edtools button[data-ins]").forEach(b=>{
+  b.onclick = ()=>{
+    const ta = $("edta");
+    const s = ta.selectionStart, e = ta.selectionEnd, sel = ta.value.slice(s,e);
+    const kind = b.dataset.ins;
+    let mark, cursorOff;
+    if (kind==="++"){ mark = `{++${sel||"new text"}++}`; }
+    else if (kind==="--"){ mark = `{--${sel||"text to delete"}--}`; }
+    else if (kind==="~~"){ mark = `{~~${sel||"old"}~>${sel||"new"}~~}`; }
+    else if (kind===">>"){ mark = (sel?sel:"") + `{>>${reviewerName()}: comment here<<}`; }
+    else { mark = `{==${sel||"highlighted"}==}`; }
+    ta.setRangeText(mark, s, e, "end");
+    ta.focus();
+    dirty = true;
+  };
+});
+
+$("btnSave").onclick = async ()=>{
+  const f = current; if(!f) return;
+  try{
+    let target = f.reviewedHandle;
+    const originalText = await readHandle(f.handle);
+    const newText = $("edta").value;
+    if (f.added){
+      target = f.handle; // files the reviewer added are edited in place
+    } else if (!target){
+      if (newText === originalText){ toast("No changes to save."); return; }
+      const revName = f.name.replace(/\.md$/, REV_SUFFIX);
+      target = await f.parentDirHandle.getFileHandle(revName, {create:true});
+      f.reviewedHandle = target;
+    }
+    const w = await target.createWritable();
+    await w.write(newText);
+    await w.close();
+    dirty = false;
+    toast(f.added ? "Saved." : "Saved to " + f.name.replace(/\.md$/, REV_SUFFIX));
+    renderTree();
+    await renderAll();
+  }catch(e){ toast("Save failed: "+e.message); }
+};
+
+/* ---------- status ---------- */
+async function setStatus(s){
+  const st = fstate(current.path);
+  st.status = s; st.statusBy = reviewerName(); st.statusAt = new Date().toISOString();
+  await saveState(); renderTree(); renderStatus();
+}
+$("btnApprove").onclick = ()=> setStatus("approved");
+$("btnReject").onclick = ()=> setStatus("changes");
+$("btnClear").onclick = async ()=>{ const st=fstate(current.path); st.status="pending"; delete st.statusBy; delete st.statusAt; await saveState(); renderTree(); renderStatus(); };
+
+/* ---------- comments ---------- */
+$("btnCmt").onclick = async ()=>{
+  const txt = $("cmttext").value.trim(); if(!txt) return;
+  fstate(current.path).comments.push({author: reviewerName(), text: txt, time: new Date().toISOString()});
+  $("cmttext").value = "";
+  await saveState(); renderComments(); renderTree();
+};
+
+/* ---------- new file ---------- */
+$("btnNew").onclick = async ()=>{
+  let name = prompt("New file name (e.g. 08_my-notes.md):");
+  if (!name) return;
+  if (!name.toLowerCase().endsWith(".md")) name += ".md";
+  try{
+    const h = await rootHandle.getFileHandle(name, {create:true});
+    const w = await h.createWritable();
+    await w.write(`# ${name.replace(/\.md$/,"").replace(/[_-]/g," ")}\n\n_Added by ${reviewerName()} on ${new Date().toISOString().slice(0,10)}_\n\n`);
+    await w.close();
+    const nf = { path:name, name, dir:"(root)", handle:h, parentDirHandle:rootHandle, reviewedHandle:null, added:true };
+    files.push(nf);
+    fstate(name).added = true;
+    await saveState();
+    renderTree();
+    selectFile(nf).then(()=> setTab("edit"));
+  }catch(e){ toast("Could not create file: "+e.message); }
+};
+
+/* ---------- export summary ---------- */
+$("btnExport").onclick = async ()=>{
+  let md = `# Review summary\n\nGenerated ${new Date().toLocaleString()} by ${reviewerName()}\n\n| File | Status | By | Edited copy | Comments |\n|---|---|---|---|---|\n`;
+  for (const f of files){
+    const st = fstate(f.path);
+    md += `| ${f.path} | ${st.status==="approved"?"✅ approved":st.status==="changes"?"❌ changes requested":"⬜ pending"} | ${st.statusBy||""} | ${f.reviewedHandle?"yes":""} | ${st.comments.length||""} |\n`;
+  }
+  md += `\n## Comments\n`;
+  let any = false;
+  for (const f of files){
+    const st = fstate(f.path);
+    if (!st.comments.length) continue;
+    any = true;
+    md += `\n### ${f.path}\n\n`;
+    for (const c of st.comments) md += `- **${c.author}** (${new Date(c.time).toLocaleString()}): ${c.text}\n`;
+  }
+  if (!any) md += `\n_No comments._\n`;
+  md += `\n---\n_Tracked changes are in the *.REVIEWED.md copies (CriticMarkup: {++add++}, {--delete--}, {~~old~>new~~}, {>>comment<<})._\n`;
+  const h = await rootHandle.getFileHandle("REVIEW_SUMMARY.md", {create:true});
+  const w = await h.createWritable(); await w.write(md); await w.close();
+  toast("REVIEW_SUMMARY.md written to the folder.");
+};
+
+window.addEventListener("beforeunload", e=>{ if(dirty){ e.preventDefault(); e.returnValue=""; } });
+</script>
+</body>
+</html>
